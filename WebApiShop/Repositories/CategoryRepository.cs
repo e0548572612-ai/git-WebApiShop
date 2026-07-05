@@ -1,0 +1,32 @@
+﻿using Entities;
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace Repositories
+{
+    public class CategoryRepository : ICategoryRepository
+    {
+        private readonly WebApiShopContext _webApiShopContext;
+
+        public CategoryRepository(WebApiShopContext webApiShopContext)
+        {
+            _webApiShopContext = webApiShopContext;
+        }
+
+        public async Task<List<Category>> GetAllCategories()
+        {
+            return await _webApiShopContext.Categories.ToListAsync();
+        }
+
+        public async Task<Category> AddCategory(Category category)
+        {
+            await _webApiShopContext.Categories.AddAsync(category);
+            await _webApiShopContext.SaveChangesAsync();
+            return category;
+        }
+    }
+}

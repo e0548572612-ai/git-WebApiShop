@@ -1,0 +1,84 @@
+﻿services:
+  redis:
+    image: redis:7-alpine
+    container_name: designroom-redis
+    command: redis-server --requirepass "RedisSecret123!"
+    ports:
+      - "6379:6379"
+
+  kafka:
+    image: bitnamilegacy/kafka:3.7.0
+    container_name: designroom-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: "broker,controller"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      # INTERNAL – used by other containers (api, order-consumer, kafka-ui)
+      # EXTERNAL – used by local dotnet run on the host machine via localhost:9094
+      KAFKA_CFG_LISTENERS: "INTERNAL://:9092,EXTERNAL://:9094,CONTROLLER://:9093"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "INTERNAL://kafka:9092,EXTERNAL://localhost:9094"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: designroom-kafka-ui
+    restart: unless-stopped
+    ports:
+      - "8090:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: "designroom"
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka:9092"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: designroom-api
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Home: "Server=<SERVER>;Database=WebApiShop;User Id=sa;Password=<SA_PASSWORD>;TrustServerCertificate=True;"
+      Redis__ConnectionString: "redis:6379,password=RedisSecret123!"
+      Redis__TTLMinutes: "10"
+      Jwt__Key: "<YOUR_JWT_SECRET_KEY>"
+      Jwt__Issuer: "WebApiShop"
+      Jwt__Audience: "WebApiShop"
+      Kafka__BootstrapServers: "kafka:9092"
+      Kafka__Topic: "order-created"
+
+  order-consumer:
+    build:
+      context: .
+      dockerfile: OrderConsumer/Dockerfile
+    container_name: designroom-order-consumer
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      Kafka__BootstrapServers: "kafka:9092"
+      Kafka__Topic: "order-created"
+      Kafka__GroupId: "order-consumer-group"
